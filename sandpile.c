@@ -1,11 +1,15 @@
 #include <errno.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -19,12 +23,53 @@ static void die(const char *s) {
 }
 
 int N = 801;
-int **grid;
+static size_t stride;
+static int *grid, *row_lo, *row_hi;
+
+static void *allocate(size_t count, size_t bytes) {
+  if (bytes && count > SIZE_MAX / bytes)
+    die("allocation size overflow");
+  void *p = calloc(count, bytes);
+  if (!p)
+    die("allocation failed");
+  return p;
+}
+
+static size_t index_at(int i, int j) {
+  return (size_t)(i + 1) * stride + (size_t)(j + 1);
+}
+
+static void setup(void) {
+  stride = (size_t)N + 2;
+  if (stride > SIZE_MAX / stride)
+    die("grid size overflow");
+  grid = allocate(stride * stride, sizeof(*grid));
+  row_lo = allocate(N, sizeof(*row_lo));
+  row_hi = allocate(N, sizeof(*row_hi));
+  int64_t r = N / 2;
+  for (int i = 0; i < N; ++i) {
+    row_lo[i] = N;
+    row_hi[i] = -1;
+    for (int j = 0; j <= MAX(i, N - 1 - i); ++j) {
+      int64_t y = i - r, x = j - r;
+      if (y * y + x * x <= r * r) {
+        row_lo[i] = MIN(row_lo[i], j);
+        row_hi[i] = j;
+      }
+    }
+  }
+}
+
+static void teardown(void) {
+  free(row_hi);
+  free(row_lo);
+  free(grid);
+}
 
 // you can also use this function to debug print your sandpile
 static void render(char *filename) {
   int chan = 3;
-  unsigned char *pixels = (unsigned char *)malloc(N * N * chan * sizeof(char));
+  unsigned char *pixels = allocate((size_t)N * N, (size_t)chan);
   int stride = N * chan;
   if (!pixels)
     die("malloc failed for PNG pixel buffer");
@@ -32,7 +77,7 @@ static void render(char *filename) {
   for (int i = 0; i < N; ++i) {
     for (int j = 0; j < N; ++j) {
       unsigned char r = 0, g = 0, b = 0;
-      switch (grid[i][j]) {
+      switch (grid[index_at(i, j)]) {
       case 0: // obsidian
         r = 15;
         g = 15;
@@ -59,7 +104,7 @@ static void render(char *filename) {
         b = 0;
       }
 
-      int pid = (i * N + j) * chan;
+      size_t pid = ((size_t)i * N + j) * chan;
       pixels[pid] = r;
       pixels[pid + 1] = g;
       pixels[pid + 2] = b;
@@ -73,27 +118,21 @@ static void render(char *filename) {
   free(pixels);
 }
 
-static void stabilize() {
-  int changed = 0;
+static void stabilize(void) {
+  int changed;
   do {
     changed = 0;
     for (int i = 0; i < N; ++i) {
-      for (int j = 0; j <= MAX(i, N - 1 - i); ++j) {
-        if ((i - N / 2) * (i - N / 2) + (j - N / 2) * (j - N / 2) <=
-            (N / 2) * (N / 2)) {
-          if (grid[i][j] < 4)
-            continue;
-          changed = 1; // topple it
-          grid[i][j] -= 4;
-          if (i > 0)
-            grid[i - 1][j]++;
-          if (j > 0)
-            grid[i][j - 1]++;
-          if (i < N - 1)
-            grid[i + 1][j]++;
-          if (j < N - 1)
-            grid[i][j + 1]++;
-        }
+      for (int j = row_lo[i]; j <= row_hi[i]; ++j) {
+        size_t k = index_at(i, j);
+        if (grid[k] < 4)
+          continue;
+        changed = 1; // topple it
+        grid[k] -= 4;
+        grid[k - stride]++;
+        grid[k - 1]++;
+        grid[k + stride]++;
+        grid[k + 1]++;
       }
     }
   } while (changed);
@@ -103,14 +142,14 @@ void find_identity() {
 #pragma omp parallel for
   for (int i = 0; i < N; ++i) {
     for (int j = 0; j < N; ++j) {
-      grid[i][j] = 6;
+      grid[index_at(i, j)] = 6;
     }
   }
   stabilize();
 #pragma omp parallel for
   for (int i = 0; i < N; ++i) {
     for (int j = 0; j < N; ++j) {
-      grid[i][j] = 6 - grid[i][j];
+      grid[index_at(i, j)] = 6 - grid[index_at(i, j)];
     }
   }
   stabilize();
@@ -124,21 +163,14 @@ int main(int argc, char **argv) {
   char *end;
   uintmax_t parsed = strtoumax(argv[1], &end, 10);
   if (errno || argv[1][0] < '0' || argv[1][0] > '9' || *end || !parsed ||
-      parsed > INT32_MAX)
+      parsed > INT_MAX / 3)
     die("grid size must be a positive int");
   N = (int)parsed;
-
-  grid = (int **)malloc(N * sizeof(int *));
-  for (int i = 0; i < N; ++i) {
-    grid[i] = (int *)malloc(N * sizeof(int));
-  }
+  setup();
 
   find_identity();
 
   render("identity.png");
-  for (int i = 0; i < N; ++i) {
-    free(grid[i]);
-  }
-  free(grid);
+  teardown();
   return EXIT_SUCCESS;
 }
