@@ -28,6 +28,7 @@ static void render(char *filename) {
   int stride = N * chan;
   if (!pixels)
     die("malloc failed for PNG pixel buffer");
+#pragma omp parallel for
   for (int i = 0; i < N; ++i) {
     for (int j = 0; j < N; ++j) {
       unsigned char r = 0, g = 0, b = 0;
@@ -99,12 +100,14 @@ static void stabilize() {
 }
 
 void find_identity() {
+#pragma omp parallel for
   for (int i = 0; i < N; ++i) {
     for (int j = 0; j < N; ++j) {
       grid[i][j] = 6;
     }
   }
   stabilize();
+#pragma omp parallel for
   for (int i = 0; i < N; ++i) {
     for (int j = 0; j < N; ++j) {
       grid[i][j] = 6 - grid[i][j];
