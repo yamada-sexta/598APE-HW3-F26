@@ -125,14 +125,15 @@ static void stabilize(void) {
     for (int i = 0; i < N; ++i) {
       for (int j = row_lo[i]; j <= row_hi[i]; ++j) {
         size_t k = index_at(i, j);
-        if (grid[k] < 4)
+        int q = grid[k] >= 4 ? grid[k] / 4 : 0;
+        if (!q)
           continue;
         changed = 1; // topple it
-        grid[k] -= 4;
-        grid[k - stride]++;
-        grid[k - 1]++;
-        grid[k + stride]++;
-        grid[k + 1]++;
+        grid[k] -= 4 * q;
+        grid[k - stride] += q;
+        grid[k - 1] += q;
+        grid[k + stride] += q;
+        grid[k + 1] += q;
       }
     }
   } while (changed);
