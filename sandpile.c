@@ -24,7 +24,8 @@ static void die(const char *s) {
 
 int N = 801;
 static size_t stride;
-static int *grid, *row_lo, *row_hi;
+static int *grid, *emission, *row_lo, *row_hi;
+static int serial_backend;
 
 static void *allocate(size_t count, size_t bytes) {
   if (bytes && count > SIZE_MAX / bytes)
@@ -44,6 +45,7 @@ static void setup(void) {
   if (stride > SIZE_MAX / stride)
     die("grid size overflow");
   grid = allocate(stride * stride, sizeof(*grid));
+  emission = allocate(stride * stride, sizeof(*emission));
   row_lo = allocate(N, sizeof(*row_lo));
   row_hi = allocate(N, sizeof(*row_hi));
   int64_t r = N / 2;
@@ -63,6 +65,7 @@ static void setup(void) {
 static void teardown(void) {
   free(row_hi);
   free(row_lo);
+  free(emission);
   free(grid);
 }
 
@@ -118,7 +121,7 @@ static void render(char *filename) {
   free(pixels);
 }
 
-static void stabilize(void) {
+static void stabilize_serial(void) {
   int changed;
   do {
     changed = 0;
@@ -139,6 +142,38 @@ static void stabilize(void) {
   } while (changed);
 }
 
+static void stabilize(void) {
+  if (serial_backend) {
+    stabilize_serial();
+    return;
+  }
+  int changed = 0;
+#pragma omp parallel shared(changed)
+  {
+    for (;;) {
+#pragma omp single
+      changed = 0;
+      for (int color = 0; color < 2; ++color) {
+#pragma omp for schedule(static) reduction(| : changed)
+        for (int i = 0; i < N; ++i) {
+          for (int j = color ^ (i & 1); j < N; j += 2) {
+            size_t k = index_at(i, j);
+            int h = grid[k] + emission[k - stride] + emission[k - 1]
+                + emission[k + stride] + emission[k + 1];
+            int q = j >= row_lo[i] && j <= row_hi[i] && h >= 4 ? h / 4 : 0;
+            grid[k] = h - 4 * q;
+            emission[k] = q;
+            changed |= q != 0;
+          }
+        }
+      }
+      if (!changed)
+        break;
+#pragma omp barrier
+    }
+  }
+}
+
 void find_identity() {
 #pragma omp parallel for
   for (int i = 0; i < N; ++i) {
@@ -156,6 +191,17 @@ void find_identity() {
   stabilize();
 }
 
+static void configure(void) {
+  const char *value = getenv("SANDPILE_BACKEND");
+  if (value && strcmp(value, "omp") && strcmp(value, "serial"))
+    die("SANDPILE_BACKEND must be omp or serial");
+  serial_backend = value && !strcmp(value, "serial");
+#ifdef _OPENMP
+  if (!getenv("OMP_NUM_THREADS"))
+    omp_set_num_threads(MIN(4, omp_get_num_procs()));
+#endif
+}
+
 int main(int argc, char **argv) {
   if (argc < 2 || argc > 2) {
     fprintf(stderr, "Usage: %s N\n", argv[0]);
@@ -167,6 +213,7 @@ int main(int argc, char **argv) {
       parsed > INT_MAX / 3)
     die("grid size must be a positive int");
   N = (int)parsed;
+  configure();
   setup();
 
   find_identity();
