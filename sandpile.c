@@ -156,6 +156,7 @@ static void stabilize(void) {
       for (int color = 0; color < 2; ++color) {
 #pragma omp for schedule(static) reduction(| : changed)
         for (int i = 0; i < N; ++i) {
+#pragma omp simd reduction(| : changed)
           for (int j = color ^ (i & 1); j < N; j += 2) {
             size_t k = index_at(i, j);
             int h = grid[k] + emission[k - stride] + emission[k - 1]
