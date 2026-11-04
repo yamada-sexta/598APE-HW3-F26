@@ -25,7 +25,9 @@ static void die(const char *s) {
 int N = 801;
 static size_t stride;
 static int *grid, *emission, *row_lo, *row_hi;
-static int serial_backend;
+static int serial_backend, chaos;
+static uint64_t seed = 598;
+static uint64_t last_rounds;
 
 static void *allocate(size_t count, size_t bytes) {
   if (bytes && count > SIZE_MAX / bytes)
@@ -67,6 +69,22 @@ static void teardown(void) {
   free(row_lo);
   free(emission);
   free(grid);
+}
+
+static uint64_t mix(uint64_t x) {
+  x ^= x >> 30;
+  x *= UINT64_C(0xbf58476d1ce4e5b9);
+  x ^= x >> 27;
+  x *= UINT64_C(0x94d049bb133111eb);
+  return x ^ (x >> 31);
+}
+
+static int batch(int height, size_t k, uint64_t round) {
+  int q = height >= 4 ? height / 4 : 0;
+  if (chaos && q > 1)
+    q = 1 + (int)(mix(seed ^ (uint64_t)k ^
+        (round * UINT64_C(0x9e3779b97f4a7c15))) % (unsigned)q);
+  return q;
 }
 
 // you can also use this function to debug print your sandpile
@@ -123,12 +141,13 @@ static void render(char *filename) {
 
 static void stabilize_serial(void) {
   int changed;
+  uint64_t round = 0;
   do {
     changed = 0;
     for (int i = 0; i < N; ++i) {
       for (int j = row_lo[i]; j <= row_hi[i]; ++j) {
         size_t k = index_at(i, j);
-        int q = grid[k] >= 4 ? grid[k] / 4 : 0;
+        int q = batch(grid[k], k, round);
         if (!q)
           continue;
         changed = 1; // topple it
@@ -139,16 +158,26 @@ static void stabilize_serial(void) {
         grid[k + 1] += q;
       }
     }
+    ++round;
   } while (changed);
+  last_rounds = round;
+}
+
+static void report_rounds(void) {
+  if (getenv("SANDPILE_STATS"))
+    fprintf(stderr, "backend=%s schedule=%s seed=%" PRIu64 " rounds=%" PRIu64 "\n",
+        serial_backend ? "serial" : "omp", chaos ? "chaos" : "bulk", seed, last_rounds);
 }
 
 static void stabilize(void) {
   if (serial_backend) {
     stabilize_serial();
+    report_rounds();
     return;
   }
   int changed = 0;
-#pragma omp parallel shared(changed)
+  uint64_t round = 0;
+#pragma omp parallel shared(changed, round)
   {
     for (;;) {
 #pragma omp single
@@ -156,12 +185,25 @@ static void stabilize(void) {
       for (int color = 0; color < 2; ++color) {
 #pragma omp for schedule(static) reduction(| : changed)
         for (int i = 0; i < N; ++i) {
+          if (!chaos) {
+
 #pragma omp simd reduction(| : changed)
+            for (int j = color ^ (i & 1); j < N; j += 2) {
+              size_t k = index_at(i, j);
+              int h = grid[k] + emission[k - stride] + emission[k - 1]
+                  + emission[k + stride] + emission[k + 1];
+              int q = j >= row_lo[i] && j <= row_hi[i] && h >= 4 ? h / 4 : 0;
+              grid[k] = h - 4 * q;
+              emission[k] = q;
+              changed |= q != 0;
+            }
+            continue;
+          }
           for (int j = color ^ (i & 1); j < N; j += 2) {
             size_t k = index_at(i, j);
             int h = grid[k] + emission[k - stride] + emission[k - 1]
                 + emission[k + stride] + emission[k + 1];
-            int q = j >= row_lo[i] && j <= row_hi[i] && h >= 4 ? h / 4 : 0;
+            int q = j >= row_lo[i] && j <= row_hi[i] ? batch(h, k, round) : 0;
             grid[k] = h - 4 * q;
             emission[k] = q;
             changed |= q != 0;
@@ -170,9 +212,12 @@ static void stabilize(void) {
       }
       if (!changed)
         break;
-#pragma omp barrier
+#pragma omp single
+      ++round;
     }
   }
+  last_rounds = round + 1;
+  report_rounds();
 }
 
 void find_identity() {
@@ -192,17 +237,6 @@ void find_identity() {
   stabilize();
 }
 
-static void configure(void) {
-  const char *value = getenv("SANDPILE_BACKEND");
-  if (value && strcmp(value, "omp") && strcmp(value, "serial"))
-    die("SANDPILE_BACKEND must be omp or serial");
-  serial_backend = value && !strcmp(value, "serial");
-#ifdef _OPENMP
-  if (!getenv("OMP_NUM_THREADS"))
-    omp_set_num_threads(MIN(4, omp_get_num_procs()));
-#endif
-}
-
 int main(int argc, char **argv) {
   if (argc < 2 || argc > 2) {
     fprintf(stderr, "Usage: %s N\n", argv[0]);
@@ -214,7 +248,25 @@ int main(int argc, char **argv) {
       parsed > INT_MAX / 3)
     die("grid size must be a positive int");
   N = (int)parsed;
-  configure();
+
+  const char *value = getenv("SANDPILE_BACKEND");
+  if (value && strcmp(value, "omp") && strcmp(value, "serial"))
+    die("SANDPILE_BACKEND must be omp or serial");
+  serial_backend = value && !strcmp(value, "serial");
+  value = getenv("SANDPILE_SCHEDULE");
+  if (value && strcmp(value, "bulk") && strcmp(value, "chaos"))
+    die("SANDPILE_SCHEDULE must be bulk or chaos");
+  chaos = value && !strcmp(value, "chaos");
+  if ((value = getenv("SANDPILE_SEED"))) {
+    errno = 0;
+    seed = strtoull(value, &end, 10);
+    if (errno || value[0] < '0' || value[0] > '9' || *end)
+      die("SANDPILE_SEED must be an unsigned integer");
+  }
+#ifdef _OPENMP
+  if (!getenv("OMP_NUM_THREADS"))
+    omp_set_num_threads(MIN(4, omp_get_num_procs()));
+#endif
   setup();
 
   find_identity();
