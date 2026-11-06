@@ -17,7 +17,11 @@ $(BUILD)/sandpile-O%.exe: sandpile.c stb_image_write.h Makefile | $(BUILD)
 
 compiler-variants: $(BUILD)/sandpile-O1.exe $(BUILD)/sandpile-O2.exe $(BUILD)/sandpile-O3.exe
 
+PYTHON ?= python3
+sat-search: | $(BUILD)
+	$(PYTHON) experiments/sat/carry_lut.py --timeout 10 --directory $(BUILD)/sat --output $(BUILD)/sat.json
+
 clean:
 	rm -f sandpile.exe $(BUILD)/*.exe
 
-.PHONY: all compiler-variants clean
+.PHONY: all compiler-variants sat-search clean
