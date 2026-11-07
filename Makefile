@@ -21,7 +21,15 @@ PYTHON ?= python3
 sat-search: | $(BUILD)
 	$(PYTHON) experiments/sat/carry_lut.py --timeout 10 --directory $(BUILD)/sat --output $(BUILD)/sat.json
 
+JULIA ?= julia
+JULIA_FLAGS ?= --startup-file=no --history-file=no --threads=1 -O3 --check-bounds=yes
+lut-bridge: | $(BUILD)
+	$(JULIA) $(JULIA_FLAGS) experiments/julia/lut_bridge.jl $(BUILD)/lut experiments/sat/known-six.toml
+
+giant-grid: | $(BUILD)
+	$(JULIA) $(JULIA_FLAGS) experiments/julia/giant_grid.jl > $(BUILD)/giant-grid.toml
+
 clean:
 	rm -f sandpile.exe $(BUILD)/*.exe
 
-.PHONY: all compiler-variants sat-search clean
+.PHONY: all compiler-variants sat-search lut-bridge giant-grid clean
