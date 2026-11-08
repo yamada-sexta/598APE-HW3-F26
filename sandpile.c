@@ -26,7 +26,7 @@ int N = 801;
 static size_t stride;
 static int *grid, *emission, *row_lo, *row_hi;
 static int serial_backend, chaos;
-static int compact_backend;
+static int compact_backend = 1;
 static const char *active_backend = "omp";
 static uint64_t seed = 598;
 static uint64_t last_rounds;
@@ -253,7 +253,7 @@ static void configure(void) {
   if (value && strcmp(value, "compact") && strcmp(value, "omp") && strcmp(value, "serial"))
     die("SANDPILE_BACKEND must be compact, omp or serial");
   serial_backend = value && !strcmp(value, "serial");
-  compact_backend = value && !strcmp(value, "compact");
+  compact_backend = !value || !strcmp(value, "compact");
   value = getenv("SANDPILE_SCHEDULE");
   if (value && strcmp(value, "bulk") && strcmp(value, "chaos"))
     die("SANDPILE_SCHEDULE must be bulk or chaos");
