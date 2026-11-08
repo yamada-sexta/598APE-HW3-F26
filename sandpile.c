@@ -26,6 +26,8 @@ int N = 801;
 static size_t stride;
 static int *grid, *emission, *row_lo, *row_hi;
 static int serial_backend, chaos;
+static int compact_backend;
+static const char *active_backend = "omp";
 static uint64_t seed = 598;
 static uint64_t last_rounds;
 
@@ -166,10 +168,18 @@ static void stabilize_serial(void) {
 static void report_rounds(void) {
   if (getenv("SANDPILE_STATS"))
     fprintf(stderr, "backend=%s schedule=%s seed=%" PRIu64 " rounds=%" PRIu64 "\n",
-        serial_backend ? "serial" : "omp", chaos ? "chaos" : "bulk", seed, last_rounds);
+        active_backend, chaos ? "chaos" : "bulk", seed, last_rounds);
 }
 
+#include "compact.h"
+
 static void stabilize(void) {
+  if (compact_backend && !serial_backend && stabilize_compact()) {
+    active_backend = "compact";
+    report_rounds();
+    return;
+  }
+  active_backend = serial_backend ? "serial" : "omp";
   if (serial_backend) {
     stabilize_serial();
     report_rounds();
@@ -237,22 +247,13 @@ void find_identity() {
   stabilize();
 }
 
-int main(int argc, char **argv) {
-  if (argc < 2 || argc > 2) {
-    fprintf(stderr, "Usage: %s N\n", argv[0]);
-    return EXIT_FAILURE;
-  }
+static void configure(void) {
   char *end;
-  uintmax_t parsed = strtoumax(argv[1], &end, 10);
-  if (errno || argv[1][0] < '0' || argv[1][0] > '9' || *end || !parsed ||
-      parsed > INT_MAX / 3)
-    die("grid size must be a positive int");
-  N = (int)parsed;
-
   const char *value = getenv("SANDPILE_BACKEND");
-  if (value && strcmp(value, "omp") && strcmp(value, "serial"))
-    die("SANDPILE_BACKEND must be omp or serial");
+  if (value && strcmp(value, "compact") && strcmp(value, "omp") && strcmp(value, "serial"))
+    die("SANDPILE_BACKEND must be compact, omp or serial");
   serial_backend = value && !strcmp(value, "serial");
+  compact_backend = value && !strcmp(value, "compact");
   value = getenv("SANDPILE_SCHEDULE");
   if (value && strcmp(value, "bulk") && strcmp(value, "chaos"))
     die("SANDPILE_SCHEDULE must be bulk or chaos");
@@ -267,6 +268,20 @@ int main(int argc, char **argv) {
   if (!getenv("OMP_NUM_THREADS"))
     omp_set_num_threads(MIN(4, omp_get_num_procs()));
 #endif
+}
+
+int main(int argc, char **argv) {
+  if (argc < 2 || argc > 2) {
+    fprintf(stderr, "Usage: %s N\n", argv[0]);
+    return EXIT_FAILURE;
+  }
+  char *end;
+  uintmax_t parsed = strtoumax(argv[1], &end, 10);
+  if (errno || argv[1][0] < '0' || argv[1][0] > '9' || *end || !parsed ||
+      parsed > INT_MAX / 3)
+    die("grid size must be a positive int");
+  N = (int)parsed;
+  configure();
   setup();
 
   find_identity();
