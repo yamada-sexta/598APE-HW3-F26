@@ -29,7 +29,10 @@ lut-bridge: | $(BUILD)
 giant-grid: | $(BUILD)
 	$(JULIA) $(JULIA_FLAGS) experiments/julia/giant_grid.jl > $(BUILD)/giant-grid.toml
 
+roulette: | $(BUILD)
+	$(JULIA) $(JULIA_FLAGS) experiments/julia/roulette.jl $(BUILD)/roulette
+
 clean:
 	rm -f sandpile.exe $(BUILD)/*.exe
 
-.PHONY: all compiler-variants sat-search lut-bridge giant-grid clean
+.PHONY: all compiler-variants sat-search lut-bridge giant-grid roulette clean

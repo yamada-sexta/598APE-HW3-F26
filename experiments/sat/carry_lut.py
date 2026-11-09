@@ -1,4 +1,14 @@
-import argparse, datetime, hashlib, json, pathlib, re, subprocess, time, threading, types
+import argparse
+import datetime
+import hashlib
+import json
+import pathlib
+import re
+import subprocess
+import sys
+import time
+import threading
+import types
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MASK = (1 << 64) - 1
 p = argparse.ArgumentParser()
@@ -109,8 +119,9 @@ def evaluate(nodes, outs, row):
         values.append(imm >> (values[aa] << 2 | values[bb] << 1 | values[cc]) & 1)
     return sum((values[index] << bit for bit, index in enumerate(outs)))
 assert all((202 >> (aa << 2 | bb << 1 | cc) & 1 == (bb if aa else cc) for aa in [0, 1] for bb in [0, 1] for cc in [0, 1]))
-r = dict(status='RUNNING', started=datetime.datetime.now(datetime.timezone.utc).isoformat(), command=__import__('sys').argv, z3_version=subprocess.check_output(['z3', '-version'], text=True).strip(), source_sha256=hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(), model='Multioutput acyclic3-input LUTs; global BV4 unsigned parent/output selectors, arbitrary global8bit LUT functions,64Boolean truth assignments in oneBV64; sorted distinct parents; unused gates allowed.', limitations='UNSAT concerns only this circuit model. Unknown/timeout is not a lower bound and says nothing about x86 speed or complete CLI performance.', queries=[])
+r = dict(status='RUNNING', started=datetime.datetime.now(datetime.timezone.utc).isoformat(), command=sys.argv, z3_version=subprocess.check_output(['z3', '-version'], text=True).strip(), source_sha256=hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(), model='Multioutput acyclic3-input LUTs; global BV4 unsigned parent/output selectors, arbitrary global8bit LUT functions,64Boolean truth assignments in oneBV64; sorted distinct parents; unused gates allowed.', limitations='UNSAT concerns only this circuit model. Unknown/timeout is not a lower bound and says nothing about x86 speed or complete CLI performance.', queries=[])
 output = ROOT / a.output
+output.parent.mkdir(parents=True, exist_ok=True)
 
 def save():
     output.write_text(json.dumps(r, indent=2) + '\n')

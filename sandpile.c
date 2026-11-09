@@ -94,8 +94,6 @@ static void render(char *filename) {
   int chan = 3;
   unsigned char *pixels = allocate((size_t)N * N, (size_t)chan);
   int stride = N * chan;
-  if (!pixels)
-    die("malloc failed for PNG pixel buffer");
 #pragma omp parallel for
   for (int i = 0; i < N; ++i) {
     for (int j = 0; j < N; ++j) {
@@ -271,11 +269,12 @@ static void configure(void) {
 }
 
 int main(int argc, char **argv) {
-  if (argc < 2 || argc > 2) {
+  if (argc != 2) {
     fprintf(stderr, "Usage: %s N\n", argv[0]);
     return EXIT_FAILURE;
   }
   char *end;
+  errno = 0;
   uintmax_t parsed = strtoumax(argv[1], &end, 10);
   if (errno || argv[1][0] < '0' || argv[1][0] > '9' || *end || !parsed ||
       parsed > INT_MAX / 3)
