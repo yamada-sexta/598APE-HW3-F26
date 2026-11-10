@@ -18,3 +18,20 @@
 
 # Compiled handouts
 /handout/*.pdf
+
+/build/
+/.reference-runs/
+*.exe
+/identity.png
+__pycache__/
+*.pyc
+*.data
+/tests/
+/results/
+/baseline/
+/scripts/
+/experiments/julia/circuit_check.jl
+/PROGRESS.md
+/EXPLORATION.md
+/PLUS.md
+/HIGH_VALUE.md
